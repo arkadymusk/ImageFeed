@@ -49,6 +49,7 @@ final class ProfileViewController: UIViewController {
             switch result {
             case .success(let profile):
                 self.updateProfileDetails(profile: profile)
+                ProfileImageService.shared.fetchProfileImageURL(username: profile.username) { _ in }
             case .failure(let error):
                 print("Error: \(error)")
             }

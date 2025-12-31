@@ -40,7 +40,7 @@ final class SplashViewController: UIViewController {
         }
         authViewController.delegate = self
         authViewController.modalPresentationStyle = .fullScreen
-        authViewController.present(authViewController, animated: true)
+        present(authViewController, animated: true)
     }
     
     override var preferredStatusBarStyle: UIStatusBarStyle {
