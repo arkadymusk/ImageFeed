@@ -6,6 +6,10 @@
 //
 import Foundation
 
+enum AuthServiceError: Error {
+    case invalidRequest
+}
+
 final class OAuth2Service {
     static let shared = OAuth2Service()
     
@@ -13,6 +17,8 @@ final class OAuth2Service {
     
     private let urlSession = URLSession.shared
     private let tokenStorage = OAuth2TokenStorage.shared
+    private var task: URLSessionTask?
+    private var lastCode: String?
     
     private func makeOAuthTokenRequest(code: String) -> URLRequest? {
         guard var urlComponents = URLComponents(string: "https://unsplash.com/oauth/token") else { return nil }
@@ -35,48 +41,60 @@ final class OAuth2Service {
     }
     
     func fetchOAuthToken(code: String, completion: @escaping (Result<String, Error>) -> Void) {
+        assert(Thread.isMainThread)
+        guard lastCode != code else {
+            completion(.failure(AuthServiceError.invalidRequest))
+            return
+        }
+        
+        task?.cancel()
+        lastCode = code
+        
         guard let request = makeOAuthTokenRequest(code: code) else {
             print("❌ Не удалось создать запрос /oauth/token")
             completion(.failure(NetworkError.invalidRequest))
             return
         }
         
-        let task = URLSession.shared.data(for: request) { [weak self] result in
+        let task = URLSession.shared.objectTask(for: request) { [weak self] (result: Result<OAuthTokenResponseBody, Error>) in
             guard let self else { return }
             
-            switch result {
-            case .success(let data):
-                do {
-                    let body = try JSONDecoder().decode(OAuthTokenResponseBody.self, from: data)
-                    let token = body.accessToken
-                    
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    let token = data.accessToken
+                        
                     self.tokenStorage.token = token
-                    
+                        
                     completion(.success(token))
-                } catch {
-                    print("❌ Decoding error:", error)
-                    completion(.failure(NetworkError.decodingError(error)))
-                }
-            case .failure(let error):
-                if let networkError = error as? NetworkError {
-                    switch networkError {
-                    case .httpStatusCode(let statusCode):
-                        print("❌ HTTP error, status code:", statusCode)
-                    case .urlRequestError(let underlying):
-                        print("❌ URL request error:", underlying)
-                    case .urlSessionError:
-                        print("❌ URLSession error")
-                    case .invalidRequest:
-                        print("❌ Invalid request")
-                    case .decodingError(let decodingError):
-                        print("❌ Decoding error:", decodingError)
+                        
+                    self.task = nil
+                    self.lastCode = nil
+                case .failure(let error):
+                    if let networkError = error as? NetworkError {
+                        switch networkError {
+                        case .httpStatusCode(let statusCode):
+                            print("❌ HTTP error, status code:", statusCode)
+                        case .urlRequestError(let underlying):
+                            print("❌ URL request error:", underlying)
+                        case .urlSessionError:
+                            print("❌ URLSession error")
+                        case .invalidRequest:
+                            print("❌ Invalid request")
+                        case .decodingError(let decodingError):
+                            print("❌ Decoding error:", decodingError)
+                        }
+                    } else {
+                        print("❌ Unknown error:", error)
                     }
-                } else {
-                    print("❌ Unknown error:", error)
+                    completion(.failure(error))
+                    
+                    self.task = nil
+                    self.lastCode = nil
                 }
-                completion(.failure(error))
             }
         }
+        self.task = task
         task.resume()
         
     }
